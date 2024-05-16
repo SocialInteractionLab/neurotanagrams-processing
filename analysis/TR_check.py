@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # read csv
-df = pd.read_csv('combined.csv')
+df = pd.read_csv('data/combined.csv')
 
 # Convert 'at' and 'finishedAt' columns to datetime for calculation
 df['at'] = pd.to_datetime(df['at'])
