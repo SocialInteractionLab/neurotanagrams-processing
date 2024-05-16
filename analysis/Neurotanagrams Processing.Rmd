@@ -1,0 +1,169 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+(a)Checks if TRs happen every 1.5 seconds
+```{r}
+library(dplyr)
+library(lubridate)
+
+# Read the CSV file
+data <- read.csv("combined.csv")
+
+# Parse the timestamps to keep only the time part with milliseconds
+data$at <- as.numeric(hms(sub(".*T", "", data$at)))
+
+# Identify indices of RoundStarted events
+round_starts <- which(data$verb == "RoundStarted")
+
+# Prepare to store results of wrong intervals
+wrong_intervals <- data.frame(gameId = character(), target = character(), trialNum = integer(), time_difference = numeric(), side = character())
+
+# Iterate over each round to calculate pulse time differences
+for (i in seq_along(round_starts)) {
+  # Determine the end of the current round
+  if (i < length(round_starts)) {
+    round_end <- round_starts[i + 1] - 1
+  } else {
+    round_end <- nrow(data)
+  }
+  
+  # Filter pulse events for the current round
+  pulses_in_round <- data[round_starts[i]:round_end, ] %>% 
+    filter(verb == "pulse") %>%
+    arrange(at)
+
+  # Group by 'side' to ensure only pulses of the same type are compared
+  pulses_by_type <- pulses_in_round %>%
+    group_by(side) %>%
+    mutate(next_at = lead(at),
+           time_difference = next_at - at)
+
+  # Remove NA values that appear due to the lead function in the last row of each group
+  pulses_by_type <- na.omit(pulses_by_type)
+  
+  # Define expected interval and tolerance
+  expected_interval <- 1.5
+  tolerance <- 0.05
+  ci_lower <- expected_interval - (expected_interval * tolerance)
+  ci_upper <- expected_interval + (expected_interval * tolerance)
+  
+  # Identify and store intervals that are incorrect
+  wrong_intervals_this_round <- pulses_by_type %>%
+    filter(time_difference < ci_lower | time_difference > ci_upper) %>%
+    select(gameId, target, trialNum, time_difference, side)
+
+  # Append to the main data frame
+  wrong_intervals <- rbind(wrong_intervals, wrong_intervals_this_round)
+}
+
+# Print results
+print(wrong_intervals)
+```
+
+
+(b)checlk if each stageIds/gameId has the same number of TRs
+```{r}
+library(dplyr)
+library(readr)
+
+# Read the CSV file
+data <- read_csv("combined.csv")
+
+# Filter for pulse events
+pulse_events <- data %>%
+  filter(verb == "pulse")
+
+# Count the number of pulses for each combination of stageIds and gameId
+counts <- pulse_events %>%
+  group_by(stageIds, gameId) %>%
+  summarise(pulse_count = n(), .groups = 'drop')
+
+# Check consistency of pulse counts across different gameIds within the same stageIds
+stage_consistency <- counts %>%
+  group_by(stageIds) %>%
+  summarise(
+    min_count = min(pulse_count),
+    max_count = max(pulse_count),
+    consistent = min_count == max_count,
+    .groups = 'drop'
+  ) %>%
+  filter(!consistent)
+
+# Check consistency of pulse counts across different stageIds within the same gameId
+game_consistency <- counts %>%
+  group_by(gameId) %>%
+  summarise(
+    min_count = min(pulse_count),
+    max_count = max(pulse_count),
+    consistent = min_count == max_count,
+    .groups = 'drop'
+  ) %>%
+  filter(!consistent)
+
+# Print results
+print("Inconsistencies across different gameIds within the same stageIds:")
+print(stage_consistency)
+
+print("Inconsistencies across different stageIds within the same gameId:")
+print(game_consistency)
+
+
+```
+
+(c)plot the graph for all the TRs. This should look like a bell curve
+```{r}
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+# Read the CSV file
+data <- read.csv("combined.csv")
+
+# Parse the timestamps to keep only the time part with milliseconds
+data$at <- as.numeric(hms(sub(".*T", "", data$at)))
+
+# Identify indices of RoundStarted events
+round_starts <- which(data$verb == "RoundStarted")
+
+# Store all TR intervals for plotting
+all_intervals <- numeric()
+
+# Iterate over each round to calculate pulse time differences
+for (i in seq_along(round_starts)) {
+  # Determine the end of the current round
+  if (i < length(round_starts)) {
+    round_end <- round_starts[i + 1] - 1
+  } else {
+    round_end <- nrow(data)
+  }
+  
+  # Filter pulse events for the current round and group by side
+  pulses_in_round <- data[round_starts[i]:round_end, ] %>%
+    filter(verb == "pulse") %>%
+    arrange(at) %>%
+    group_by(side) %>%
+    mutate(next_at = lead(at))
+
+  # Calculate time differences within each exposure type
+  pulses_in_round <- pulses_in_round %>%
+    filter(!is.na(next_at)) %>%
+    mutate(time_difference = next_at - at)
+
+  # Append to the complete list of intervals
+  all_intervals <- c(all_intervals, pulses_in_round$time_difference)
+}
+
+# Filter out extreme outliers for a more meaningful analysis
+#filtered_intervals <- all_intervals[all_intervals < 10 & all_intervals > 0]
+#if needed use this to filter out the outliers, can adjust accordingly
+
+# Plot the density of TR intervals to observe the distribution shape
+ggplot(data.frame(TimeDifferences = all_intervals), aes(x = TimeDifferences)) +
+  geom_density(fill = "steelblue", alpha = 0.5) +
+  labs(title = "Density Plot of TR Intervals",x = "Time Interval (seconds)",y = "Density")
+
+
+```
+
